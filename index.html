@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>逃走 - Escape</title>
+<title>シシボ遊び</title>
 <style>
   :root{
     --accent:#8fb4ff;
@@ -97,10 +97,12 @@
     transform:translate(-50%,-50%) scale(0.6);
     color:var(--danger);
     font-size:28px;font-weight:800;letter-spacing:3px;
-    text-shadow:0 0 18px rgba(255,77,94,0.9), 0 0 4px #000;
+    text-shadow:0 0 18px currentColor, 0 0 4px #000;
     opacity:0;
     pointer-events:none;
     z-index:15;
+    text-align:center;
+    white-space:nowrap;
     transition:opacity 0.15s, transform 0.15s;
   }
   #levelUpText.show{ opacity:1; transform:translate(-50%,-50%) scale(1); }
@@ -188,6 +190,32 @@
   #leaderList li.rank2 .rank{ color:#c9c9c9; }
   #leaderList li.rank3 .rank{ color:#d99a5b; }
   .loadingRow{ color:rgba(255,255,255,0.4); font-size:13px; padding:14px 0; }
+
+#dexList{
+  list-style:none;margin:0 0 16px;padding:0;
+  text-align:left;
+  border-top:1px solid rgba(255,255,255,0.1);
+}
+#dexList li{
+  display:flex;align-items:center;gap:12px;
+  padding:11px 4px;
+  border-bottom:1px solid rgba(255,255,255,0.08);
+}
+.dexSwatch{
+  width:34px;height:34px;border-radius:50%;flex-shrink:0;
+  border:2px solid rgba(255,255,255,0.35);
+  display:flex;align-items:center;justify-content:center;
+  font-size:15px;
+}
+.dexSwatch.locked{ background:rgba(255,255,255,0.06); border-style:dashed; color:rgba(255,255,255,0.3); }
+.dexInfo{ flex:1; text-align:left; }
+.dexName{ font-size:14px;font-weight:700; }
+.dexName.locked{ color:rgba(255,255,255,0.35); }
+.dexOdds{ font-size:11px;color:rgba(255,255,255,0.4); }
+.dexRainbowSwatch{
+  background:linear-gradient(135deg,#ff5b5b,#ffd35b,#5bff8f,#5bd0ff,#a95bff);
+}
+
   #loadOverlay .barOuter{
     width:100%;height:6px;border-radius:4px;background:rgba(255,255,255,0.12);
     overflow:hidden;margin-top:10px;
@@ -209,6 +237,7 @@
   </div>
   <div id="topRightBtns">
     <button class="iconBtn" id="soundBtn">🔊</button>
+    <button class="iconBtn" id="btnDexTop">📖 図鑑</button>
     <button class="iconBtn" id="btnRankTop">🏆 記録</button>
   </div>
 </div>
@@ -223,11 +252,12 @@
 <!-- Start screen -->
 <div class="overlay" id="startScreen">
   <div class="card">
-    <h1>🕯️ 逃 走</h1>
-    <p class="sub">暗い部屋に何かがいる。<br>方向ボタンをタップして、化物から逃げ続けろ。<br>時間が経つほど、奴は速くなる。</p>
+    <h1>🕯️ シシボ遊び</h1>
+    <p class="sub">暗い部屋にシシボがいる。<br>方向ボタンをタップして、シシボから逃げ続けろ。<br>時間が経つほど、奴は速くなる。<br>激レアな色のシシボに出会えるかも…？</p>
     <input type="text" id="nameInput" placeholder="あなたの名前" maxlength="14">
     <button class="btn btn-primary" id="btnStart">スタート</button>
     <button class="btn btn-secondary" id="btnShowRankFromStart">🏆 ランキングを見る</button>
+    <button class="btn btn-secondary" id="btnShowDexFromStart">📖 図鑑を見る</button>
   </div>
 </div>
 
@@ -240,6 +270,7 @@
     <div id="submitStatus" style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:16px;min-height:16px;">記録を送信中…</div>
     <button class="btn btn-secondary" id="btnRetry">もう一度逃げる</button>
     <button class="btn btn-secondary" id="btnShowRankFromOver">🏆 ランキングを見る</button>
+    <button class="btn btn-secondary" id="btnShowDexFromOver">📖 図鑑を見る</button>
   </div>
 </div>
 
@@ -250,6 +281,16 @@
     <p class="sub">一人につき最高記録のみ登録されます</p>
     <ul id="leaderList"><li class="loadingRow">読み込み中…</li></ul>
     <button class="btn btn-primary" id="btnCloseRank">閉じる</button>
+  </div>
+</div>
+
+<!-- Pokedex screen -->
+<div class="overlay hidden" id="dexScreen">
+  <div class="card">
+    <h1>📖 シシボ図鑑</h1>
+    <p class="sub">出会った色違いのシシボがここに記録される</p>
+    <ul id="dexList"></ul>
+    <button class="btn btn-primary" id="btnCloseDex">閉じる</button>
   </div>
 </div>
 
@@ -322,6 +363,33 @@ function fetchLeaderboard(limit){
         resolve(arr);
       }).catch(reject);
   });
+}
+
+// Register a rare-variant discovery globally (one count per unique player name).
+function registerGlobalVariant(name, variant){
+  if(!fbReady) return Promise.resolve();
+  const key = sanitizeKey(name);
+  const playerRef = db.collection('dexPlayers').doc(key);
+  return playerRef.get().then(snap=>{
+    const data = snap.exists ? snap.data() : {};
+    const already = (data.variants||[]).includes(variant);
+    if(already) return; // this player already counted for this variant
+    const holderRef = db.collection('dexHolders').doc(variant);
+    const batch = db.batch();
+    batch.set(playerRef, { variants: firebase.firestore.FieldValue.arrayUnion(variant) }, {merge:true});
+    batch.set(holderRef, { count: firebase.firestore.FieldValue.increment(1) }, {merge:true});
+    return batch.commit();
+  }).catch(e=>{ console.error('dex holder update failed', e); });
+}
+
+// Fetch how many unique players hold each rare variant, game-wide.
+function fetchHolderCounts(){
+  if(!fbReady) return Promise.resolve({});
+  return db.collection('dexHolders').get().then(snap=>{
+    const out = {};
+    snap.forEach(doc=>{ out[doc.id] = (doc.data().count)||0; });
+    return out;
+  }).catch(()=>({}));
 }
 
 /* ===================== Sprite Data (embedded) ===================== */
@@ -522,6 +590,70 @@ function cellToPx(c,r){
   return { x: gOffX + c*CELL + CELL/2, y: gOffY + r*CELL + CELL/2 };
 }
 
+/* ===================== Pokedex (color variants) ===================== */
+const VARIANTS = {
+  bronze:  { label:'ブロンズ',   color:'#cd8a3c', odds:'1 / 10,000',       filter:'sepia(0.7) saturate(2.6) hue-rotate(-8deg) brightness(0.95) contrast(1.05)' },
+  silver:  { label:'シルバー',   color:'#cfd8de', odds:'1 / 1,000,000',    filter:'grayscale(1) brightness(1.4) contrast(1.15)' },
+  blue:    { label:'ブルー',     color:'#4d8dff', odds:'1 / 2,500,000',    filter:'hue-rotate(190deg) saturate(3.4) brightness(1.05)' },
+  red:     { label:'レッド',     color:'#ff4d4d', odds:'1 / 5,000,000',    filter:'hue-rotate(-28deg) saturate(4.2) brightness(1.02) contrast(1.05)' },
+  rainbow: { label:'レインボー', color:'#ffffff', odds:'1 / 100,000,000',  filter:null }
+};
+const VARIANT_ORDER = ['bronze','silver','blue','red','rainbow'];
+const DEX_KEY = 'shishiboPokedex';
+
+function rollVariant(){
+  const r = Math.floor(Math.random()*100000000); // 0 .. 99,999,999
+  if(r < 1) return 'rainbow';
+  if(r < 1+20) return 'red';
+  if(r < 1+20+40) return 'blue';
+  if(r < 1+20+40+100) return 'silver';
+  if(r < 1+20+40+100+10000) return 'bronze';
+  return 'normal';
+}
+function getDexData(){
+  try{ return JSON.parse(localStorage.getItem(DEX_KEY)||'[]'); }catch(e){ return []; }
+}
+function registerVariant(key){
+  const data = getDexData();
+  if(!data.includes(key)){
+    data.push(key);
+    localStorage.setItem(DEX_KEY, JSON.stringify(data));
+    return true; // newly discovered
+  }
+  return false;
+}
+function renderDex(){
+  const list = document.getElementById('dexList');
+  const found = getDexData();
+  list.innerHTML = '';
+  VARIANT_ORDER.forEach(key=>{
+    const v = VARIANTS[key];
+    const has = found.includes(key);
+    const li = document.createElement('li');
+    const swatchClass = key==='rainbow' && has ? 'dexSwatch dexRainbowSwatch' : 'dexSwatch'+(has?'':' locked');
+    const swatchStyle = (has && key!=='rainbow') ? ('style="background:'+v.color+';"') : '';
+    li.innerHTML =
+      '<div class="'+swatchClass+'" '+swatchStyle+'>'+(has?'':'?')+'</div>'+
+      '<div class="dexInfo">'+
+        '<div class="dexName'+(has?'':' locked')+'">'+(has? v.label+'のシシボ' : '？？？')+'</div>'+
+        '<div class="dexOdds">出現率: '+v.odds+'</div>'+
+        '<div class="dexOdds" id="dexCount-'+key+'">所持者: …人</div>'+
+      '</div>';
+    list.appendChild(li);
+  });
+  fetchHolderCounts().then(counts=>{
+    VARIANT_ORDER.forEach(key=>{
+      const el = document.getElementById('dexCount-'+key);
+      if(el) el.textContent = '所持者: '+(counts[key]||0)+'人';
+    });
+  }).catch(()=>{
+    VARIANT_ORDER.forEach(key=>{
+      const el = document.getElementById('dexCount-'+key);
+      if(el) el.textContent = '所持者数を取得できませんでした';
+    });
+  });
+}
+
 /* ===================== Game State ===================== */
 const PLAYER_MOVE_MS = 150;        // time to slide one tile
 const CATCH_RADIUS = 30;
@@ -552,12 +684,21 @@ function resetGame(){
   const corners = [[0,0],[cols-1,0],[0,rows-1],[cols-1,rows-1]];
   const [mc,mr] = corners[Math.floor(Math.random()*corners.length)];
   monster = makeGridActor(mc, mr, 78, 78);
+  monster.variant = rollVariant();
 
   startTime = performance.now();
   elapsed = 0;
   monsterAccum = 0;
   lastLevel = 0;
   running = true;
+
+  if(monster.variant !== 'normal'){
+    const v = VARIANTS[monster.variant];
+    const isNew = registerVariant(monster.variant);
+    showBanner((isNew? '激レア出現！ ':'') + v.label + 'のシシボ！', v.color, 1500);
+    Sound.levelUpBlip();
+    registerGlobalVariant(currentPlayerName(), monster.variant);
+  }
 }
 
 function monsterLevel(){
@@ -571,14 +712,20 @@ function currentSpeedMult(){
   return MONSTER_STEP_MS_BASE / monsterStepInterval();
 }
 
-let levelUpTimer = null;
-function triggerLevelUp(){
+let bannerTimer = null;
+function showBanner(text, color, ms){
   const el = document.getElementById('levelUpText');
+  el.textContent = text;
+  el.style.color = color || '';
   el.classList.add('show');
-  clearTimeout(levelUpTimer);
-  levelUpTimer = setTimeout(()=>{ el.classList.remove('show'); }, 900);
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(()=>{ el.classList.remove('show'); }, ms||900);
+}
+function triggerLevelUp(){
+  showBanner('スピードアップ!!', '', 900);
   Sound.levelUpBlip();
 }
+
 
 function fmtTime(ms){
   const totalMs = Math.max(0, Math.floor(ms));
@@ -736,7 +883,16 @@ function draw(){
   const mImg = images.monster;
   const mScale = 0.9 + 0.15*Math.sin(performance.now()/180);
   const mw = monster.w*mScale, mh = monster.h*mScale;
+  ctx.save();
+  const variant = monster.variant || 'normal';
+  if(variant === 'rainbow'){
+    const hue = (performance.now()/8) % 360;
+    ctx.filter = 'hue-rotate('+hue+'deg) saturate(4) brightness(1.05)';
+  } else if(variant !== 'normal' && VARIANTS[variant]){
+    ctx.filter = VARIANTS[variant].filter;
+  }
   ctx.drawImage(mImg, monster.x-mw/2, monster.y-mh/2, mw, mh);
+  ctx.restore();
 
   // player shadow + sprite
   drawShadow(player.x, player.y+player.h*0.42, player.w*0.32);
@@ -869,6 +1025,12 @@ document.getElementById('btnRankTop').addEventListener('click', ()=>{ rankScreen
 document.getElementById('btnShowRankFromStart').addEventListener('click', ()=>{ rankScreen.classList.remove('hidden'); renderLeaderboard(); });
 document.getElementById('btnShowRankFromOver').addEventListener('click', ()=>{ rankScreen.classList.remove('hidden'); renderLeaderboard(); });
 document.getElementById('btnCloseRank').addEventListener('click', ()=>{ rankScreen.classList.add('hidden'); });
+
+const dexScreen = document.getElementById('dexScreen');
+document.getElementById('btnDexTop').addEventListener('click', ()=>{ dexScreen.classList.remove('hidden'); renderDex(); });
+document.getElementById('btnShowDexFromStart').addEventListener('click', ()=>{ dexScreen.classList.remove('hidden'); renderDex(); });
+document.getElementById('btnShowDexFromOver').addEventListener('click', ()=>{ dexScreen.classList.remove('hidden'); renderDex(); });
+document.getElementById('btnCloseDex').addEventListener('click', ()=>{ dexScreen.classList.add('hidden'); });
 
 /* ===================== Boot ===================== */
 const loadBar = document.getElementById('loadBar');
