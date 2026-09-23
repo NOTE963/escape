@@ -592,22 +592,33 @@ function cellToPx(c,r){
 
 /* ===================== Pokedex (color variants) ===================== */
 const VARIANTS = {
+  green:   { label:'グリーン',   color:'#4ddc7a', odds:'1 / 500',          filter:'hue-rotate(95deg) saturate(3.2) brightness(1.05)' },
+  pink:    { label:'ピンク',     color:'#ff7ec9', odds:'1 / 500',          filter:'hue-rotate(300deg) saturate(2.6) brightness(1.12)' },
+  orange:  { label:'オレンジ',   color:'#ff9f40', odds:'1 / 500',          filter:'saturate(3.2) brightness(1.1) contrast(1.05)' },
   bronze:  { label:'ブロンズ',   color:'#cd8a3c', odds:'1 / 10,000',       filter:'sepia(0.7) saturate(2.6) hue-rotate(-8deg) brightness(0.95) contrast(1.05)' },
   silver:  { label:'シルバー',   color:'#cfd8de', odds:'1 / 1,000,000',    filter:'grayscale(1) brightness(1.4) contrast(1.15)' },
   blue:    { label:'ブルー',     color:'#4d8dff', odds:'1 / 2,500,000',    filter:'hue-rotate(190deg) saturate(3.4) brightness(1.05)' },
   red:     { label:'レッド',     color:'#ff4d4d', odds:'1 / 5,000,000',    filter:'hue-rotate(-28deg) saturate(4.2) brightness(1.02) contrast(1.05)' },
   rainbow: { label:'レインボー', color:'#ffffff', odds:'1 / 100,000,000',  filter:null }
 };
-const VARIANT_ORDER = ['bronze','silver','blue','red','rainbow'];
+const VARIANT_ORDER = ['green','pink','orange','bronze','silver','blue','red','rainbow'];
 const DEX_KEY = 'shishiboPokedex';
 
-function rollVariant(){
-  const r = Math.floor(Math.random()*100000000); // 0 .. 99,999,999
-  if(r < 1) return 'rainbow';
-  if(r < 1+20) return 'red';
-  if(r < 1+20+40) return 'blue';
-  if(r < 1+20+40+100) return 'silver';
-  if(r < 1+20+40+100+10000) return 'bronze';
+const RARE_GROWTH_PER_LEVEL = 0.4; // odds grow just a little with each speed level-up
+const RARE_GROWTH_CAP = 50;        // safety cap for very long survival times
+function rollVariant(level){
+  const lvl = level || 0;
+  const growth = Math.min(1 + lvl*RARE_GROWTH_PER_LEVEL, RARE_GROWTH_CAP);
+  const total = 100000000; // 1億
+  const r = Math.floor(Math.random()*total); // 0 .. 99,999,999
+  let c = 1*growth;              if(r < c) return 'rainbow';
+  c += 20*growth;                if(r < c) return 'red';
+  c += 40*growth;                if(r < c) return 'blue';
+  c += 100*growth;               if(r < c) return 'silver';
+  c += 10000*growth;             if(r < c) return 'bronze';
+  c += 200000*growth;            if(r < c) return 'green';
+  c += 200000*growth;            if(r < c) return 'pink';
+  c += 200000*growth;            if(r < c) return 'orange';
   return 'normal';
 }
 function getDexData(){
@@ -721,7 +732,20 @@ function showBanner(text, color, ms){
   clearTimeout(bannerTimer);
   bannerTimer = setTimeout(()=>{ el.classList.remove('show'); }, ms||900);
 }
-function triggerLevelUp(){
+function triggerLevelUp(level){
+  // each speed level-up gives another (slightly better) chance for a rare variant
+  if(monster.variant === 'normal'){
+    const nv = rollVariant(level);
+    if(nv !== 'normal'){
+      monster.variant = nv;
+      const v = VARIANTS[nv];
+      const isNew = registerVariant(nv);
+      showBanner((isNew? '激レア出現！ ':'') + v.label + 'のシシボに変化！！', v.color, 1600);
+      Sound.levelUpBlip();
+      registerGlobalVariant(currentPlayerName(), nv);
+      return;
+    }
+  }
   showBanner('スピードアップ!!', '', 900);
   Sound.levelUpBlip();
 }
@@ -822,7 +846,7 @@ function update(dt){
   const lvl = monsterLevel();
   if(lvl > lastLevel){
     lastLevel = lvl;
-    triggerLevelUp();
+    triggerLevelUp(lvl);
   }
 
   // ---- heartbeat BGM tempo tied to speed ----
