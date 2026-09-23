@@ -557,12 +557,50 @@ document.querySelectorAll('.dbtn').forEach(btn=>{
 const keys = {};
 window.addEventListener('keydown', e=>{ keys[e.key.toLowerCase()]=true; });
 window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
+
+/* ===================== Gamepad (Switch / PS controller, etc.) ===================== */
+let gamepadConnected = false;
+window.addEventListener('gamepadconnected', ()=>{
+  gamepadConnected = true;
+  showBanner('🎮 コントローラー接続！', '', 1200);
+});
+window.addEventListener('gamepaddisconnected', ()=>{
+  gamepadConnected = false;
+  showBanner('🎮 コントローラー切断', '', 1200);
+});
+function gamepadVec(){
+  if(!navigator.getGamepads) return {x:0,y:0};
+  const pads = navigator.getGamepads();
+  for(const gp of pads){
+    if(!gp || !gp.connected) continue;
+    let x=0, y=0;
+    // Standard mapping D-pad: 14=left,15=right,12=up,13=down
+    const b = gp.buttons;
+    if(b[14] && b[14].pressed) x -= 1;
+    if(b[15] && b[15].pressed) x += 1;
+    if(b[12] && b[12].pressed) y -= 1;
+    if(b[13] && b[13].pressed) y += 1;
+    // fall back to left analog stick if D-pad not pressed
+    if(x===0 && y===0 && gp.axes && gp.axes.length>=2){
+      const ax = gp.axes[0], ay = gp.axes[1];
+      if(Math.abs(ax) > 0.4) x = ax;
+      if(Math.abs(ay) > 0.4) y = ay;
+    }
+    if(x!==0 || y!==0) return {x,y};
+  }
+  return {x:0,y:0};
+}
+
 function keyboardVec(){
   let x=0,y=0;
   if(dpadState.left || keys['arrowleft']||keys['a']) x-=1;
   if(dpadState.right || keys['arrowright']||keys['d']) x+=1;
   if(dpadState.up || keys['arrowup']||keys['w']) y-=1;
   if(dpadState.down || keys['arrowdown']||keys['s']) y+=1;
+  if(x===0 && y===0){
+    const gv = gamepadVec();
+    x = gv.x; y = gv.y;
+  }
   const len = Math.hypot(x,y);
   if(len>1){ x/=len; y/=len; }
   return {x,y};
